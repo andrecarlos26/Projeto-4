@@ -1,0 +1,101 @@
+CREATE OR REPLACE STREAM "TBL_1" (
+    CIDADE VARCHAR(16),
+    TEMPERATURA_AR_CELCIUS FLOAT,
+    TEMPERATURA_AR_FAHRENHEIT FLOAT,
+	UMDIDADE_AR INTEGER
+);
+
+CREATE OR REPLACE PUMP "PUMP_1" AS
+    INSERT INTO "TBL_1"
+        SELECT STREAM
+			DC_NOME,
+			TEM_INS,
+			(TEM_INS * 1.8 + 32),
+			UMD_INS
+		FROM "SOURCE_SQL_STREAM_001"
+;
+
+CREATE OR REPLACE STREAM "TBL_2" (
+    CIDADE VARCHAR(16),
+    TEMPERATURA_AR_CELCIUS FLOAT,
+    TEMPERATURA_AR_FAHRENHEIT FLOAT,
+    UMDIDADE_AR INTEGER,
+    INDICE_CALOR_F NUMERIC(10,2)
+);
+
+CREATE OR REPLACE PUMP "PUMP_2" AS
+    INSERT INTO "TBL_2"
+        SELECT STREAM
+            CIDADE,
+            TEMPERATURA_AR_CELCIUS,
+            TEMPERATURA_AR_FAHRENHEIT,
+            UMDIDADE_AR,
+            CASE
+                WHEN (TEMPERATURA_AR_FAHRENHEIT * 1.1 - 10.3 + UMDIDADE_AR * 0.047) < 80
+                    THEN (TEMPERATURA_AR_FAHRENHEIT * 1.1 - 10.3 + UMDIDADE_AR * 0.047)
+                WHEN (TEMPERATURA_AR_FAHRENHEIT >= 80 AND TEMPERATURA_AR_FAHRENHEIT <= 112 AND UMDIDADE_AR <= 13)
+                    THEN (
+                        - 42.379 + 2.04901523 * TEMPERATURA_AR_FAHRENHEIT + 10.14333127 * UMDIDADE_AR
+                        - 0.22475541 * TEMPERATURA_AR_FAHRENHEIT * UMDIDADE_AR
+                        - 6.83783 * POWER(10, -3) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2)
+                        - 5.481717 * POWER(10, -2) * POWER(UMDIDADE_AR, 2)
+                        + 1.22874 * POWER(10, -3) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2) * UMDIDADE_AR
+                        + 8.5282 * POWER(10, -4) * TEMPERATURA_AR_FAHRENHEIT * POWER(UMDIDADE_AR, 2)
+                        - 1.99 * POWER(10, -6) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2) * POWER(UMDIDADE_AR, 2)
+                        - (3.25 - 0.25 * UMDIDADE_AR) * ((17 - abs(TEMPERATURA_AR_FAHRENHEIT - 95)) / 17) * 0.5
+                    )
+                WHEN (TEMPERATURA_AR_FAHRENHEIT >= 80 AND TEMPERATURA_AR_FAHRENHEIT <= 87 AND UMDIDADE_AR > 85)
+                    THEN (
+                        - 42.379 + 2.04901523 * TEMPERATURA_AR_FAHRENHEIT + 10.14333127 * UMDIDADE_AR
+                        - 0.22475541 * TEMPERATURA_AR_FAHRENHEIT * UMDIDADE_AR
+                        - 6.83783 * POWER(10, -3) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2)
+                        - 5.481717 * POWER(10, -2) * POWER(UMDIDADE_AR, 2)
+                        + 1.22874 * POWER(10, -3) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2) * UMDIDADE_AR
+                        + 8.5282 * POWER(10, -4) * TEMPERATURA_AR_FAHRENHEIT * POWER(UMDIDADE_AR, 2)
+                        - 1.99 * POWER(10, -6) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2) * POWER(UMDIDADE_AR, 2)
+                        + 0.02 * (UMDIDADE_AR - 85) * (87 - TEMPERATURA_AR_FAHRENHEIT)
+                    )
+            ELSE (
+                - 42.379 + 2.04901523 * TEMPERATURA_AR_FAHRENHEIT + 10.14333127 * UMDIDADE_AR
+                - 0.22475541 * TEMPERATURA_AR_FAHRENHEIT * UMDIDADE_AR
+                - 6.83783 * POWER(10, -3) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2)
+                - 5.481717 * POWER(10, -2) * POWER(UMDIDADE_AR, 2)
+                + 1.22874 * POWER(10, -3) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2) * UMDIDADE_AR
+                + 8.5282 * POWER(10, -4) * TEMPERATURA_AR_FAHRENHEIT * POWER(UMDIDADE_AR, 2)
+                - 1.99 * POWER(10, -6) * POWER(TEMPERATURA_AR_FAHRENHEIT, 2) * POWER(UMDIDADE_AR, 2)
+            )
+            END
+        FROM "TBL_1"
+;
+
+CREATE OR REPLACE STREAM "DESTINATION_SQL_STREAM" (
+    CIDADE VARCHAR(16),
+    TEMPERATURA_AR_ FLOAT,
+    UMDIDADE_AR_ INTEGER,
+    INDICE_CALOR_ NUMERIC(10,2),
+    NIVEL_ALERTA_ VARCHAR(16)
+);
+
+CREATE OR REPLACE PUMP "PUMP_DESTINATION" AS
+    INSERT INTO "DESTINATION_SQL_STREAM"
+        SELECT STREAM
+            CIDADE,
+            TEMPERATURA_AR_CELCIUS,
+            UMDIDADE_AR,
+            ((INDICE_CALOR_F - 32) * 0.555555556),
+            CASE
+                WHEN ((INDICE_CALOR_F - 32) * 0.555555556) <= 27
+                    THEN 'Normal'
+                WHEN ((INDICE_CALOR_F - 32) * 0.555555556) <= 32
+                    THEN 'Cautela'
+                WHEN ((INDICE_CALOR_F - 32) * 0.555555556) <= 41
+                    THEN 'Cautela Extrema'
+                WHEN ((INDICE_CALOR_F - 32) * 0.555555556) <= 54
+                    THEN 'Perigo'
+                WHEN ((INDICE_CALOR_F - 32) * 0.555555556) > 54
+                    THEN 'Perigo Extremo'
+                WHEN INDICE_CALOR_F IS NULL
+                    THEN ' '  
+            END
+        FROM "TBL_2"
+
